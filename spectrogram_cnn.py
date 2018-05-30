@@ -57,7 +57,20 @@ class_imbalance = 0.14
 target = "KD"
 input_shape = (j, 1024, 1)
 # input_shape = (j*1024,)
-nn_type = "CNN"
+nn_type = "NN"
+num_channels = 1
+
+# Declare the CNN model
+
+if nn_type is "CNN":
+    model = get_cnn_model()
+    num_channels = 1
+elif nn_type is "NN":
+    model = get_nn_model()
+    num_channels = 0
+else:
+    model = None
+
 
 # Prepare data
 spectrograms, num_frames = data.import_smt.load_smt_dataset("./data/smt_spectrograms.h5")
@@ -65,18 +78,12 @@ data_size = num_frames - (j-1) * len(spectrograms)  # you lose last (j-1) frames
 train_size = int(data_size * 0.7)
 
 train_ids = np.arange(start=1, stop=train_size)
-training_generator = data.cnn_data_generator.DataGenerator(train_ids, spectrograms=spectrograms, dim=input_shape, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
+training_generator = data.cnn_data_generator.DataGenerator(train_ids, spectrograms=spectrograms, spec_width=j, num_channels=num_channels, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
 
 test_ids = np.arange(start=train_size, stop=data_size)
-test_generator = data.cnn_data_generator.DataGenerator(test_ids, spectrograms=spectrograms, dim=input_shape, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
+test_generator = data.cnn_data_generator.DataGenerator(test_ids, spectrograms=spectrograms, spec_width=j, num_channels=num_channels, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
 
-# Declare the CNN model
-if nn_type is "CNN":
-    model = get_cnn_model()
-elif nn_type is "NN":
-    model = get_nn_model()
-else:
-    model = None
+
 
 model.add(Dense(1, activation='sigmoid'))
 loss = keras.losses.binary_crossentropy

@@ -6,7 +6,7 @@ class DataGenerator(keras.utils.Sequence):
     Generates data for Keras
     Example adapted from https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly.html
     """
-    def __init__(self, list_IDs, spectrograms=None, target="HH", batch_size=32, dim=(32,32,32),
+    def __init__(self, list_IDs, spectrograms=None, target="HH", batch_size=32, spec_width = 10, spec_bins = 1024, num_channels = 1, #dim=(32,32,32),
                  n_classes=2, shuffle=True):
         'Initialization'
 
@@ -15,10 +15,16 @@ class DataGenerator(keras.utils.Sequence):
         if len(list_IDs) <= batch_size:
             raise ValueError("Cannot generate data: len(list_IDs) = " + str(len(spectrograms)))
 
+        if not 0 <= num_channels <= 1:
+            raise ValueError("Currently only values 0 or 1 are supported for num_channels!")
+
         #TODO: more sanity checks on spectrograms?
         self.spectrograms = spectrograms
         self.target = target
-        self.dim = dim
+        # self.dim = dim
+        self.spec_width = spec_width
+        self.spec_bins = spec_bins
+        self.num_channels = num_channels
         self.batch_size = batch_size
         # self.labels = labels
         self.list_IDs = list_IDs
@@ -62,7 +68,7 @@ class DataGenerator(keras.utils.Sequence):
         self.LUT = []
         while curr_spec_index < len(self.spectrograms):
             curr_spec_len = self.spectrograms[curr_spec_index].shape[0]
-            if i < curr_spec_len - self.dim[0] + 1:  # subtract the width of the image
+            if i < curr_spec_len - self.spec_width + 1:  # subtract the width of the image
                 # self.LUT[i] = (curr_spec_index, i)
                 self.LUT.append((curr_spec_index, i))
                 i += 1
@@ -73,7 +79,9 @@ class DataGenerator(keras.utils.Sequence):
     def __data_generation(self, list_IDs_temp):
         'Generates data containing batch_size samples'  # X : (n_samples, *dim, n_channels)
         # Initialization, Python 2
-        X = np.empty((self.batch_size, self.dim[0], self.dim[1], self.dim[2]))
+        X = np.empty((self.batch_size, self.spec_width, self.spec_bins, self.num_channels)) if self.num_channels is not 0 else \
+            np.empty((self.batch_size, self.spec_width * self.spec_bins))
+
         y = np.empty((self.batch_size), dtype=int)
 
         # Generate data
@@ -81,8 +89,14 @@ class DataGenerator(keras.utils.Sequence):
             # Store sample
             spectrogram_index, row_number = self.LUT[ID]
             # X[i] = self.spectrograms[ID:(ID+self.dim[0])].reshape(self.dim)
-            X[i] = self.spectrograms[spectrogram_index].iloc[row_number:row_number+self.dim[0], 0:self.dim[1]]\
-                .values.reshape(self.dim)
+            sub_spectrogram = self.spectrograms[spectrogram_index].iloc[row_number:row_number+self.spec_width, 0:self.spec_bins]\
+                .values #.reshape(dim)
+            if self.num_channels is not 0: # expand one axis
+                sub_spectrogram = sub_spectrogram[:, :, np.newaxis]
+            else:
+                sub_spectrogram = sub_spectrogram.reshape((self.spec_width * self.spec_bins, ))
+
+            X[i] = sub_spectrogram
 
             # Store class
             y[i] = self.spectrograms[spectrogram_index].iloc[row_number][self.target]
