@@ -4,6 +4,8 @@ import xml.dom.minidom
 import numpy as np
 import pandas as pd
 import madmom
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 
@@ -122,24 +124,60 @@ def build_smt_drums_dataset(path, hdf5_path=None):
 
     return spectrograms
 
+def count_total_frames(spectrograms):
+    """
+    Iterates through the array of spectrograms and counts the total number of frames
+    """
+    total_len = 0
+    for spec in spectrograms:
+        total_len += spec.shape[0]
+
+    return total_len
+
 def load_smt_dataset(hd5_path):
     """
     :param hd5_path:
     :return: (an array of pandas dataframes, total number of spectrogram frames)
     """
     try:
-        total_len = 0
         store = pd.HDFStore(hd5_path)
         spectrograms = [store.get(key) for key in store.keys()] #pd.read_hdf(hd5_path, "/*")
         store.close()
     except Exception as e:
         raise e
 
-    for spec in spectrograms:
-        total_len += spec.shape[0]
 
-    return spectrograms, total_len
+    return spectrograms, count_total_frames(spectrograms)
 
+
+def load_smt_train_test_std(hd5_path, seed=42, test_size=0.25):
+    """
+    Same as load_smt but already splits into train and test. The mean and std are compute for train part only.
+    :param hd5_path:
+    :return:
+    """
+    spectrograms, _ = load_smt_dataset(hd5_path)
+    train_ids, test_ids = train_test_split(np.arange(1, len(spectrograms)), random_state=seed, shuffle=True,
+                                           test_size=test_size)
+
+    # Get the mean and variance for the training set
+    scaler = StandardScaler()
+    for i in train_ids:
+        scaler.partial_fit(spectrograms[i].values[:, 0:1024])
+
+    # Apply the transformation on the whole data set
+    for i in range(len(spectrograms)):
+        scaled_features = scaler.transform(spectrograms[i].values[:, 0:1024])
+        scaled_df = pd.DataFrame(scaled_features)
+        scaled_df[["HH", "KD", "SD"]] = spectrograms[i][["HH", "KD", "SD"]]  # Just copy/paste the labels
+
+        # Replace the spectrograms with the scaled sectrograms
+        spectrograms[i] = scaled_df
+
+    train_specs = [spectrograms[i] for i in train_ids]
+    test_specs = [spectrograms[i] for i in test_ids]
+
+    return train_specs, test_specs
 
 # Usage examples:
 # spectrograms = build_smt_drums_dataset("/mnt/antares_raid/home/cristiprg/notebooks/SMT_DRUMS", "./smt_spectrograms.h5")
