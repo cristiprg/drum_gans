@@ -4,15 +4,16 @@ import data.cnn_data_generator
 import data.import_smt
 from dcgan import DCGAN
 import matplotlib.pyplot as plt
-plt.switch_backend('agg')
+# plt.switch_backend('agg')
 
 
 class Spectrogram_dcgan():
-    def __init__(self, j=10, batch_size=128, target="HH"):
+    def __init__(self, j=10, batch_size=128, target="HH", data=None):
         self.training_generator = None
         self.test_generator = None
         self.batch_size = batch_size
         self.target = target
+        self.data = data
 
         self.spec_cols = 1024
         self.spec_length = j
@@ -26,43 +27,62 @@ class Spectrogram_dcgan():
         self.load_data()
 
     def load_data(self):
-        # Prepare data, adapted from spectrogram.cnn.py
-        spectrograms, num_frames = data.import_smt.load_smt_dataset("./data/smt_spectrograms.h5")
-        data_size = num_frames - (self.spec_cols - 1) * len(
-            spectrograms)  # you lose last (j-1) frames at the end of the spectrograms
-        train_size = int(data_size * 0.7)
 
-        train_ids = np.arange(start=1, stop=train_size)
-        self.training_generator = data.cnn_data_generator.DataGenerator(train_ids, spectrograms=spectrograms, spec_width=self.spec_length,
+        if self.data is None:
+            # Prepare data, adapted from spectrogram.cnn.py
+            spectrograms, num_frames = data.import_smt.load_smt_dataset("./data/smt_spectrograms.h5")
+            data_size = num_frames - (self.spec_cols - 1) * len(
+                spectrograms)  # you lose last (j-1) frames at the end of the spectrograms
+            train_size = int(data_size * 0.7)
+
+            train_ids = np.arange(start=1, stop=train_size)
+            self.training_generator = data.cnn_data_generator.DataGenerator(train_ids, spectrograms=spectrograms, spec_width=self.spec_length,
+                                                                            num_channels=1, shuffle=True,
+                                                                            n_classes=2, batch_size=self.batch_size,
+                                                                            target=self.target)
+
+            test_ids = np.arange(start=train_size, stop=data_size)
+            self.test_generator = data.cnn_data_generator.DataGenerator(test_ids, spectrograms=spectrograms, spec_width=self.spec_length,
                                                                         num_channels=1, shuffle=True,
                                                                         n_classes=2, batch_size=self.batch_size,
                                                                         target=self.target)
+            self.data_size = data_size
 
-        test_ids = np.arange(start=train_size, stop=data_size)
-        self.test_generator = data.cnn_data_generator.DataGenerator(test_ids, spectrograms=spectrograms, spec_width=self.spec_length,
-                                                                    num_channels=1, shuffle=True,
-                                                                    n_classes=2, batch_size=self.batch_size,
-                                                                    target=self.target)
-        self.data_size = data_size
+            # train_specs, test_specs = data.import_smt.load_smt_train_test_std("./data/smt_spectrograms.h5", test_size=0)
+            # train_num_frames = data.import_smt.count_total_frames(train_specs)
+            # test_num_frames = data.import_smt.count_total_frames(test_specs)
+            #
+            # train_data_size = train_num_frames - (self.spec_length - 1) * len(
+            #     train_specs)  # you lose last (j-1) frames at the end of the spectrograms
+            # # test_data_size = test_num_frames - (self.spec_length - 1) * len(test_specs)
+            #
+            # self.training_generator = data.cnn_data_generator.DataGenerator(np.arange(train_data_size), spectrograms=train_specs,
+            #                                                            spec_width=self.spec_length, num_channels=1,
+            #                                                            shuffle=True, n_classes=2,
+            #                                                            batch_size=self.batch_size, target=self.target)
+            # # self.test_generator = data.cnn_data_generator.DataGenerator(np.arange(test_data_size), spectrograms=test_specs,
+            # #                                                        spec_width=j, num_channels=1, shuffle=True,
+            # #                                                        n_classes=2, batch_size=self.batch_size,
+            # #                                                        target=self.target)
+            #
+            # self.train_data_size = train_data_size
 
-        # train_specs, test_specs = data.import_smt.load_smt_train_test_std("./data/smt_spectrograms.h5", test_size=0)
-        # train_num_frames = data.import_smt.count_total_frames(train_specs)
-        # test_num_frames = data.import_smt.count_total_frames(test_specs)
-        #
-        # train_data_size = train_num_frames - (self.spec_length - 1) * len(
-        #     train_specs)  # you lose last (j-1) frames at the end of the spectrograms
-        # # test_data_size = test_num_frames - (self.spec_length - 1) * len(test_specs)
-        #
-        # self.training_generator = data.cnn_data_generator.DataGenerator(np.arange(train_data_size), spectrograms=train_specs,
-        #                                                            spec_width=self.spec_length, num_channels=1,
-        #                                                            shuffle=True, n_classes=2,
-        #                                                            batch_size=self.batch_size, target=self.target)
-        # # self.test_generator = data.cnn_data_generator.DataGenerator(np.arange(test_data_size), spectrograms=test_specs,
-        # #                                                        spec_width=j, num_channels=1, shuffle=True,
-        # #                                                        n_classes=2, batch_size=self.batch_size,
-        # #                                                        target=self.target)
-        #
-        # self.train_data_size = train_data_size
+        else:
+            # Try to keep the code as similar as above
+            spectrograms, num_frames = self.data, data.import_smt.count_total_frames(self.data)
+            data_size = num_frames - (self.spec_cols - 1) * len(
+                spectrograms)  # you lose last (j-1) frames at the end of the spectrograms
+            train_size = 1 * data_size  # 100%
+
+            train_ids = np.arange(start=1, stop=train_size)
+            self.training_generator = data.cnn_data_generator.DataGenerator(train_ids, spectrograms=spectrograms,
+                                                                            spec_width=self.spec_length,
+                                                                            num_channels=1, shuffle=True,
+                                                                            n_classes=2, batch_size=self.batch_size,
+                                                                            target=self.target)
+            self.data_size = data_size
+
+
 
     def train(self, train_steps=2000, batch_size=256, save_interval=0):
         noise_input = None

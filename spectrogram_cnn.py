@@ -8,10 +8,12 @@ import matplotlib.pylab as plt
 import numpy as np
 import datetime
 
+from spectrogram_dcgan import Spectrogram_dcgan
 import data.cnn_data_generator
 import data.import_smt
 import kallbacks
 
+import logging
 
 def get_cnn_model():
     model = Sequential()
@@ -31,7 +33,7 @@ def get_cnn_model():
 
     model.add(Flatten())
     model.add(Dense(100, activation='relu'))
-
+    model.add(Dense(1, activation='sigmoid'))
     return model
 
 def get_nn_model():
@@ -40,8 +42,22 @@ def get_nn_model():
     model.add(Dense(50, activation='relu'))
     model.add(Dense(50, activation='relu'))
     model.add(Dense(50, activation='relu'))
+    model.add(Dense(1, activation='sigmoid'))
     return model
 
+def get_cnn_discriminator(spectrograms):
+    batch_size = 128
+
+    logging.info("Instantiating Spectrogram DCGAN")
+    spectrogram_dcgan = Spectrogram_dcgan(j=16, batch_size=batch_size, target="HH", data=spectrograms)
+
+    number_of_batches = len(spectrogram_dcgan.training_generator)
+    logging.info("Training DCGAN on %d batches of size %d")
+    spectrogram_dcgan.train(train_steps=number_of_batches, batch_size=batch_size, save_interval=2)
+
+    logging.info("Finished training DCGAN")
+
+    return spectrogram_dcgan.DCGAN.discriminator()
 
 # Prepare variables
 DEBUG = False # For checking Tensorboard. This will not use a generator but will load the entire dataset in memory.
@@ -57,14 +73,36 @@ class_imbalance = 0.14
 target = "KD"
 input_shape = (j, 1024, 1)
 # input_shape = (j*1024,)
-nn_type = "NN"
+nn_type = "CNN_Discriminator"
 num_channels = 1
 seed = 42
+
+# Prepare data
+# spectrograms, num_frames = data.import_smt.load_smt_dataset("./data/smt_spectrograms.h5")
+train_specs, test_specs = data.import_smt.load_smt_train_test_std("./data/smt_spectrograms.h5", seed=seed)
+
+gan_train_ratio = 0.5
+nr_gan_train_specs = int(len(train_specs) * gan_train_ratio)
+gan_train_specs, cnn_train_specs = train_specs[:nr_gan_train_specs], train_specs[nr_gan_train_specs:]
+
+# From here, train means CNN train, not GAN train
+train_num_frames = data.import_smt.count_total_frames(cnn_train_specs)
+test_num_frames = data.import_smt.count_total_frames(test_specs)
+
+train_data_size = train_num_frames - (j-1) * len(cnn_train_specs)  # you lose last (j-1) frames at the end of the spectrograms
+test_data_size = test_num_frames - (j-1) * len(test_specs)
+
+training_generator = data.cnn_data_generator.DataGenerator(np.arange(train_data_size), spectrograms=cnn_train_specs, spec_width=j, num_channels=num_channels, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
+test_generator = data.cnn_data_generator.DataGenerator(np.arange(test_data_size), spectrograms=test_specs, spec_width=j, num_channels=num_channels, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
+
 
 # Declare the CNN model
 
 if nn_type is "CNN":
     model = get_cnn_model()
+    num_channels = 1
+elif nn_type is "CNN_Discriminator":
+    model = get_cnn_discriminator(gan_train_specs)
     num_channels = 1
 elif nn_type is "NN":
     model = get_nn_model()
@@ -73,20 +111,6 @@ else:
     model = None
 
 
-# Prepare data
-# spectrograms, num_frames = data.import_smt.load_smt_dataset("./data/smt_spectrograms.h5")
-train_specs, test_specs = data.import_smt.load_smt_train_test_std("./data/smt_spectrograms.h5", seed=seed)
-train_num_frames = data.import_smt.count_total_frames(train_specs)
-test_num_frames = data.import_smt.count_total_frames(test_specs)
-
-train_data_size = train_num_frames - (j-1) * len(train_specs)  # you lose last (j-1) frames at the end of the spectrograms
-test_data_size = test_num_frames - (j-1) * len(test_specs)
-
-training_generator = data.cnn_data_generator.DataGenerator(np.arange(train_data_size), spectrograms=train_specs, spec_width=j, num_channels=num_channels, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
-test_generator = data.cnn_data_generator.DataGenerator(np.arange(test_data_size), spectrograms=test_specs, spec_width=j, num_channels=num_channels, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
-
-
-model.add(Dense(1, activation='sigmoid'))
 loss = keras.losses.binary_crossentropy
 model.compile(loss=keras.losses.binary_crossentropy,
               optimizer=keras.optimizers.Adam(),
