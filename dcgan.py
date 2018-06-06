@@ -11,13 +11,13 @@ import time
 from tensorflow.examples.tutorials.mnist import input_data
 
 from keras.models import Sequential
-from keras.layers import Dense, Activation, Flatten, Reshape
+from keras.layers import Dense, Activation, Flatten, Reshape, InputLayer
 from keras.layers import Conv2D, Conv2DTranspose, UpSampling2D
 from keras.layers import LeakyReLU, Dropout
 from keras.layers import BatchNormalization
 from keras.optimizers import Adam, RMSprop
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 class ElapsedTimer(object):
     def __init__(self):
@@ -73,6 +73,14 @@ class DCGAN(object):
         self.D.add(Flatten())
         self.D.add(Dense(1))
         self.D.add(Activation('sigmoid'))
+
+        # self.D.add(InputLayer(input_shape=input_shape))
+        # self.D.add(Flatten())
+        # self.D.add(Dense(50, activation='relu'))
+        # self.D.add(Dense(50, activation='relu'))
+        # self.D.add(Dense(50, activation='relu'))
+        # self.D.add(Dense(1))
+
         self.D.summary()
         return self.D
 
@@ -82,13 +90,14 @@ class DCGAN(object):
         self.G = Sequential()
         dropout = 0.4
         depth = 64+64+64+64
-        dim = 7
+        rows = 2
+        cols = 128
         # In: 100
         # Out: dim x dim x depth
-        self.G.add(Dense(dim*dim*depth, input_dim=100))
+        self.G.add(Dense(rows*cols*depth, input_dim=100))
         self.G.add(BatchNormalization(momentum=0.9))
         self.G.add(Activation('relu'))
-        self.G.add(Reshape((dim, dim, depth)))
+        self.G.add(Reshape((rows, cols, depth)))
         self.G.add(Dropout(dropout))
 
         # In: dim x dim x depth
@@ -103,6 +112,7 @@ class DCGAN(object):
         self.G.add(BatchNormalization(momentum=0.9))
         self.G.add(Activation('relu'))
 
+        self.G.add(UpSampling2D())  # ???
         self.G.add(Conv2DTranspose(int(depth/8), 5, padding='same'))
         self.G.add(BatchNormalization(momentum=0.9))
         self.G.add(Activation('relu'))
@@ -110,6 +120,13 @@ class DCGAN(object):
         # Out: 28 x 28 x 1 grayscale image [0.0,1.0] per pix
         self.G.add(Conv2DTranspose(1, 5, padding='same'))
         self.G.add(Activation('sigmoid'))
+
+        # self.G.add(Dense(50, activation='relu', input_dim=100))
+        # self.G.add(Dense(50, activation='relu'))
+        # self.G.add(Dense(50, activation='relu'))
+        # self.G.add(Dense(self.img_cols * self.img_rows))
+        # d_input_shape = (self.img_rows, self.img_cols, self.channel)
+        # self.G.add(Reshape(d_input_shape))
         self.G.summary()
         return self.G
 
