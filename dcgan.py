@@ -119,7 +119,7 @@ class DCGAN(object):
 
         # Out: 28 x 28 x 1 grayscale image [0.0,1.0] per pix
         self.G.add(Conv2DTranspose(1, 5, padding='same'))
-        self.G.add(Activation('sigmoid'))
+        self.G.add(Activation('tanh'))
 
         # self.G.add(Dense(50, activation='relu', input_dim=100))
         # self.G.add(Dense(50, activation='relu'))
