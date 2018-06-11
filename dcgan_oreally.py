@@ -5,11 +5,48 @@ import numpy as np
 import datetime
 import matplotlib.pyplot as plt
 
-from tensorflow.examples.tutorials.mnist import input_data
-mnist = input_data.read_data_sets("MNIST_data/")
+# from tensorflow.examples.tutorials.mnist import input_data
+# mnist = input_data.read_data_sets("MNIST_data/")
 # sample_image = mnist.train.next_batch(1)[0]
 # print sample_image.shape
 # plt.imshow(sample_image.reshape((28, 28)))
+
+import data.cnn_data_generator
+import data.import_smt
+
+j = 16  # @param
+v = 5  # @param
+e = 2  # @param
+num_classes = 2
+batch_size = 64
+epochs = 10
+class_imbalance = 0.14
+target = "KD"
+input_shape = (j, 1024, 1)
+# input_shape = (j*1024,)
+nn_type = "CNN_Conditional_Discriminator"
+num_channels = 1
+seed = 42
+
+# Prepare data
+# spectrograms, num_frames = data.import_smt.load_smt_dataset("./data/smt_spectrograms.h5")
+train_specs, test_specs = data.import_smt.load_smt_train_test_std("./data/smt_spectrograms.h5", seed=seed)
+
+gan_train_ratio = 0.00
+nr_gan_train_specs = int(len(train_specs) * gan_train_ratio)
+gan_train_specs, cnn_train_specs = train_specs[:nr_gan_train_specs], train_specs[nr_gan_train_specs:]
+
+# From here, train means CNN train, not GAN train
+train_num_frames = data.import_smt.count_total_frames(cnn_train_specs)
+test_num_frames = data.import_smt.count_total_frames(test_specs)
+
+train_data_size = train_num_frames - (j-1) * len(cnn_train_specs)  # you lose last (j-1) frames at the end of the spectrograms
+test_data_size = test_num_frames - (j-1) * len(test_specs)
+
+training_generator = data.cnn_data_generator.DataGenerator(np.arange(train_data_size), spectrograms=cnn_train_specs, spec_width=j, num_channels=num_channels, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
+test_generator = data.cnn_data_generator.DataGenerator(np.arange(test_data_size), spectrograms=test_specs, spec_width=j, num_channels=num_channels, shuffle=True, n_classes=num_classes, batch_size=batch_size, target=target)
+
+print("len(training_generator)=", len(training_generator))
 
 def discriminator(images, reuse=False):
 
@@ -18,6 +55,7 @@ def discriminator(images, reuse=False):
     with tf.variable_scope(tf.get_variable_scope(), reuse=reuse):
 
         # First conv layer and pool layers
+        # Size : j*1024*1
         d_w1 = tf.get_variable('d_w1', [5, 5, 1, 32],
                                initializer=tf.truncated_normal_initializer(stddev=0.02))
         d_b1 = tf.get_variable('d_b1', [32],
@@ -29,6 +67,7 @@ def discriminator(images, reuse=False):
         d1 = tf.nn.avg_pool(d1, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
 
         # Second conv layer, almost same
+        # Size: 8*512*32
         d_w2 = tf.get_variable('d_w2', [5, 5, 32, 64],
                                initializer=tf.truncated_normal_initializer(stddev=0.02))
         d_b2 = tf.get_variable('d_b2', [64],
@@ -40,11 +79,12 @@ def discriminator(images, reuse=False):
         d2 = tf.nn.avg_pool(d2, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
 
         # Fully connected layer 1
-        d_w3 = tf.get_variable('d_w3', [7 * 7 * 64, 1024],
+        # Size: 4*256*64
+        d_w3 = tf.get_variable('d_w3', [4 * 256 * 64, 1024],
                                initializer=tf.truncated_normal_initializer(stddev=0.02))
         d_b3 = tf.get_variable('d_b3', [1024],
                                initializer=tf.constant_initializer(0))
-        d3 = tf.reshape(d2, [-1, 7 * 7 * 64])
+        d3 = tf.reshape(d2, [-1, 4 * 256 * 64])
         d3 = tf.matmul(d3, d_w3)
         d3 = d3 + d_b3
         d3 = tf.nn.relu(d3)
@@ -61,13 +101,13 @@ def discriminator(images, reuse=False):
 
 
 def generator(z, batch_size, z_dim):
-    g_w1 = tf.get_variable('g_w1', [z_dim, 3136], dtype=tf.float32,
+    g_w1 = tf.get_variable('g_w1', [z_dim, j*1024*4], dtype=tf.float32,
                            initializer=tf.truncated_normal_initializer(stddev=0.02))
-    g_b1 = tf.get_variable('b_w1', [3136], initializer=tf.truncated_normal_initializer(stddev=0.02))
+    g_b1 = tf.get_variable('b_w1', [j*1024*4], initializer=tf.truncated_normal_initializer(stddev=0.02))
 
     g1 = tf.matmul(z, g_w1)
     g1 = g1 + g_b1
-    g1 = tf.reshape(g1, [-1, 56, 56, 1])
+    g1 = tf.reshape(g1, [-1, j*2, 1024*2, 1])
     g1 = tf.contrib.layers.batch_norm(g1, epsilon=1e-5, scope='bn1')
     g1 = tf.nn.relu(g1)
 
@@ -78,7 +118,7 @@ def generator(z, batch_size, z_dim):
     g2 = g2 + g_b2
     g2 = tf.contrib.layers.batch_norm(g2, epsilon=1e-5, scope='bn2')
     g2 = tf.nn.relu(g2)
-    g2 = tf.image.resize_images(g2, [56, 56])
+    g2 = tf.image.resize_images(g2, [j*2, 1024*2])
 
     # Generate 25 features
     g_w3 = tf.get_variable('g_w3', [3, 3, z_dim / 2, z_dim / 4], dtype=tf.float32,
@@ -88,7 +128,7 @@ def generator(z, batch_size, z_dim):
     g3 = g3 + g_b3
     g3 = tf.contrib.layers.batch_norm(g3, epsilon=1e-5, scope='bn3')
     g3 = tf.nn.relu(g3)
-    g3 = tf.image.resize_images(g3, [56, 56])
+    g3 = tf.image.resize_images(g3, [j*2, 1024*2])
 
     # Final convolution with one output channel
     g_w4 = tf.get_variable('g_w4', [1, 1, z_dim/4, 1], dtype=tf.float32, initializer=tf.truncated_normal_initializer(stddev=0.02))
@@ -100,13 +140,13 @@ def generator(z, batch_size, z_dim):
     return g4
 
 
-batch_size = 50
+# batch_size = 64
 
 # placeholder for noise generator
 z_dimensions = 100
 z_placeholder = tf.placeholder(tf.float32, [None, z_dimensions], name="z_placeholder")
 
-x_placeholder = tf.placeholder(tf.float32, shape=[None, 28, 28 ,1], name="x_placeholder")
+x_placeholder = tf.placeholder(tf.float32, shape=[None, j, 1024, 1], name="x_placeholder")
 
 Gz = generator(z_placeholder, batch_size, z_dimensions)  # Generated images
 Dx = discriminator(x_placeholder)
@@ -148,8 +188,10 @@ with tf.Session() as sess:
     writer = tf.summary.FileWriter(logdir, sess.graph)
 
     # Trick: pretrain the discriminator only
-    for i in range(300):
-        real_image_batch = mnist.train.next_batch(batch_size)[0].reshape([batch_size, 28, 28, 1])
+    steps_pre_train_d = 100
+    for i in range(steps_pre_train_d):
+        # real_image_batch = mnist.train.next_batch(batch_size)[0].reshape([batch_size, 28, 28, 1])
+        real_image_batch, _ = training_generator.__getitem__(i)
         z_batch = np.random.normal(0, 1, size=[batch_size, z_dimensions])
 
         _, _, dLossReal, dLossFake = sess.run([d_trainer_real, d_trainer_fake, d_loss_real, d_loss_fake],
@@ -160,10 +202,11 @@ with tf.Session() as sess:
             print("dLossReal:", dLossReal, " dLossFake:", dLossFake)
 
     # Main loop - train generator and discriminator
-    for i in range(10000):
+    for i in range(steps_pre_train_d, len(training_generator)):
 
         # Train discriminator on real and fake data
-        real_image_batch = mnist.train.next_batch(batch_size)[0].reshape([batch_size, 28, 28, 1])
+        # real_image_batch = mnist.train.next_batch(batch_size)[0].reshape([batch_size, 28, 28, 1])
+        real_image_batch, _ = training_generator.__getitem__(i)
         z_batch = np.random.normal(0, 1, size=[batch_size, z_dimensions])
 
         _, _, dLossReal, dLossFake = sess.run([d_trainer_real, d_trainer_fake, d_loss_real, d_loss_fake],
@@ -180,16 +223,17 @@ with tf.Session() as sess:
             summary = sess.run(merged, feed_dict={x_placeholder: real_image_batch,
                                                   z_placeholder: z_batch})
             writer.add_summary(summary, i)
+            writer.flush()
 
-        if i % 1000 == 0:
+        if i % 100 == 0:
             # Generate some images for the fun of it
             print("Iteration: ", i)
             z_batch = np.random.normal(0, 1, size=[1, z_dimensions])
             img = sess.run(Gz, feed_dict={z_placeholder: z_batch})
 
-            plt.imshow(img.reshape([28, 28]), cmap='gray')
+            plt.imshow(img.T.reshape([1024, j]), cmap='gray')
             plt.savefig("image_%d.png" % i)
 
             result = discriminator(x_placeholder)
-            estimate = sess.run(result, feed_dict={x_placeholder: img.reshape([1, 28, 28, 1])})
+            estimate = sess.run(result, feed_dict={x_placeholder: img.reshape([1, j, 1024, 1])})
             print("Estimate: ", estimate)
